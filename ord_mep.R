@@ -8,16 +8,22 @@
 #dplyr, ampvis, vegan, 
 ord_mep <- function(
     datalist, #with 3 elements loaded with amp_load: abund, metadata and tax, first two required
-    ncomp = 3, 
-    color = NULL, #Color the dots by some variable in the metadata
-    type = "PCA", #ordination type; PCA, RDA, NMDS, MMDS(or PCOA), CA, CCA
-    metric = "sqrt", #distance metric to use to calculate distance matrix for input to the ordination functions
-    constrain = NULL, #variable(s) for constrained analyses; RDA and CCA
+    color_by = NULL, #Color points by a variable in the metadata
+    type = "PCA", #Ordination type; PCA, RDA, NMDS, MMDS(or PCOA), CA, CCA
+    metric = "sqrt", #Distance metric to use to calculate distance matrix for input to the ordination functions
+    constrain = NULL, #Variable(s) in the metadata for constrained analyses; RDA and CCA
+    frame = TRUE, #Frame the points with a polygon colored by the color_by argument
+    label_by = NULL, #Display text labels frin a variable in the metadata, can also be used to plot environmental variables
     output = "plot", #"plot" or "detailed"; output as list with additional information(model, scores, inputmatrix etc) or just the plot
     ... #Pass additional arguments to the vegan ordination functions, fx rda(...), cca(...), metaMDS(...), see vegan help
 ) {
     #Check the data
     datalist <- amp_rename(data = datalist, tax.empty = "best")
+    
+    #to fix user argument characters, so fx PCoA/PCOA/pcoa are all valid
+    type <- tolower(type)
+    metric <- tolower(metric)
+    output <- tolower(output)
     
     #Calculate distance/variance/covariance/dissimilarity/similarity matrix from vegdist()
     if(metric == "sqrt") {
@@ -27,9 +33,10 @@ ord_mep <- function(
     } else if(any(metric == c("manhattan", "euclidean", "canberra", "bray", "kulczynski", "jaccard", "gower", "altGower", "morisita", "horn", "mountford", "raup" , "binomial", "chao", "cao", "mahalanobis"))) {
         inputmatrix <- vegdist(t(datalist$abund), method = metric)
     }
+    #################################### end of block ####################################
     
     #Generate data depending on the chosen ordination type
-    if(type == "PCA") {
+    if(type == "pca") {
         #make the model
         model <- rda(inputmatrix, ...)
         
@@ -41,9 +48,9 @@ ord_mep <- function(
         totalvar <- round(model$CA$eig/model$CA$tot.chi * 100, 1)
         
         #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:ncomp)$sites
+        scores <- scores(model, choices = 1:5)$sites
         d <- cbind.data.frame(datalist$metadata, scores)
-    } else if(type == "RDA") {
+    } else if(type == "rda") {
         if(is.null(constrain)) 
             stop("Argument constrain must be provided when performing constrained/canonical analysis.")
         #make the model
@@ -63,9 +70,9 @@ ord_mep <- function(
         )
         
         #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:ncomp)$sites
+        scores <- scores(model, choices = 1:5)$sites
         d <- cbind.data.frame(datalist$metadata, scores)
-    } else if(type == "NMDS") {
+    } else if(type == "nmds") {
         #make the model
         model <- metaMDS(inputmatrix, trace = FALSE, distance = metric, ...)
         
@@ -74,9 +81,9 @@ ord_mep <- function(
         y_axis_name <- "NMDS2"
         
         #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:ncomp)
+        scores <- scores(model, choices = 1:5)
         d <- cbind.data.frame(datalist$metadata, scores)
-    } else if(type == "MMDS" | type == "PCOA") {
+    } else if(type == "mmds" | type == "pcoa") {
         #make the model
         model <- cmdscale(inputmatrix, eig = TRUE, ...)
         
@@ -85,10 +92,10 @@ ord_mep <- function(
         y_axis_name <- "MDS2"
         
         #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:ncomp)
+        scores <- scores(model, choices = 1:5)
         colnames(scores) <- c(x_axis_name, y_axis_name)
         d <- cbind.data.frame(datalist$metadata, scores)
-    } else if(type == "CA") {
+    } else if(type == "ca") {
         #make the model
         model <- cca(inputmatrix, ...)
         
@@ -100,9 +107,9 @@ ord_mep <- function(
         totalvar <- round(model$CA$eig/model$CA$tot.chi * 100, 1)
         
         #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:ncomp)$sites
+        scores <- scores(model, choices = 1:5)$sites
         d <- cbind.data.frame(datalist$metadata, scores)
-    } else if(type == "CCA") {
+    } else if(type == "cca") {
         if(is.null(constrain)) 
             stop("Argument constrain must be provided when performing constrained/canonical analysis.")
         #make the model
@@ -122,21 +129,60 @@ ord_mep <- function(
         )
         
         #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:ncomp)$sites
+        scores <- scores(model, choices = 1:5)$sites
         d <- cbind.data.frame(datalist$metadata, scores)
     }
+    #################################### end of block ####################################
+    
     # Generate a nice ggplot with the coordinates from scores
     plot <- ggplot(d,
-                   aes_string(x = x_axis_name, y = y_axis_name, color = color)
+                   aes_string(x = x_axis_name, y = y_axis_name, color = color_by)
     ) +
         geom_point(size = 2) + 
         theme_minimal() +
         theme(axis.line = element_line(colour = "black", size = 0.5))
-    if(type == "PCA" | type == "RDA" | type == "CA" | type == "CCA") {
+    
+    #only some ordination methods can be displayed with % on axes
+    if(type == "pca" | type == "rda" | type == "ca" | type == "cca") {
         plot <- plot +
             xlab(paste(x_axis_name, " [", totalvar[x_axis_name], "%]", sep = "")) + 
             ylab(paste(y_axis_name, " [", totalvar[y_axis_name], "%]", sep = ""))
     }
+    
+    #Generate a color frame around the chosen color group
+    if(frame == TRUE) {
+        splitData <- split(d, d[, color_by]) %>% 
+            lapply(function(df) {
+                df[chull(df[, x_axis_name], df[, y_axis_name]), ]
+            })
+        hulls <- do.call(rbind, splitData)
+        plot <- plot + geom_polygon(data = hulls, aes_string(fill = color_by, group = color_by), alpha = 0.2)
+    }
+    
+    #Plot text labels
+    if (!is.null(label_by)) {
+        temp <- data.frame(group = d[, label_by], 
+                         x = d[, x_axis_name],
+                         y = d[, y_axis_name]) %>% 
+            group_by(group) %>%
+            summarise(cx = mean(x), cy = mean(y)) %>% 
+            as.data.frame()
+        temp2 <- merge(d, temp,
+                     by.x = label_by, 
+                     by.y = "group")
+        temp3 <- temp2[!duplicated(temp2[, label_by]), ]
+        plot <- plot + geom_text(data = temp3,
+                                 aes_string(x = "cx", 
+                                            y = "cy",
+                                            label = label_by),
+                                 size = 3,
+                                 color = "black",
+                                 fontface = 2
+                                 )
+    }
+    #################################### end of block ####################################
+    
+    #return plot or additional details
     if(output == "plot")
         return(plot)
     else if(output == "detailed")
