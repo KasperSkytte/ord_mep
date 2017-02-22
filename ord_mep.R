@@ -9,11 +9,12 @@
 ord_mep <- function(
     datalist, #with 3 elements loaded with amp_load: abund, metadata and tax, first two required
     color_by = NULL, #Color points by a variable in the metadata
-    type = "PCA", #Ordination type; PCA, RDA, NMDS, MMDS(or PCOA), CA, CCA
+    type = "PCA", #Ordination type; PCA, RDA, NMDS, MMDS(or PCOA), CA, CCA, DCA
     metric = "sqrt", #Distance metric to use to calculate distance matrix for input to the ordination functions
     constrain = NULL, #Variable(s) in the metadata for constrained analyses; RDA and CCA
-    frame = TRUE, #Frame the points with a polygon colored by the color_by argument
+    colorframe = TRUE, #Frame the points with a polygon colored by the color_by argument
     label_by = NULL, #Display text labels frin a variable in the metadata, can also be used to plot environmental variables
+    plot_species_points = FALSE,
     output = "plot", #"plot" or "detailed"; output as list with additional information(model, scores, inputmatrix etc) or just the plot
     ... #Pass additional arguments to the vegan ordination functions, fx rda(...), cca(...), metaMDS(...), see vegan help
 ) {
@@ -47,9 +48,9 @@ ord_mep <- function(
         #Calculate the percentage of eigenvalues explained by the axes
         totalvar <- round(model$CA$eig/model$CA$tot.chi * 100, 1)
         
-        #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:5)$sites
-        d <- cbind.data.frame(datalist$metadata, scores)
+        #Calculate species- and site scores
+        sitescores <- scores(model, display = "sites")
+        speciesscores <- scores(model, display = "species")
     } else if(type == "rda") {
         if(is.null(constrain)) 
             stop("Argument constrain must be provided when performing constrained/canonical analysis.")
@@ -69,9 +70,9 @@ ord_mep <- function(
                       round(model$CCA$eig/model$CA$tot.chi * 100, 1)
         )
         
-        #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:5)$sites
-        d <- cbind.data.frame(datalist$metadata, scores)
+        #Calculate species- and site scores
+        sitescores <- scores(model, display = "sites")
+        speciesscores <- scores(model, display = "species")
     } else if(type == "nmds") {
         #make the model
         model <- metaMDS(inputmatrix, trace = FALSE, distance = metric, ...)
@@ -80,21 +81,21 @@ ord_mep <- function(
         x_axis_name <- "NMDS1"
         y_axis_name <- "NMDS2"
         
-        #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:5)
-        d <- cbind.data.frame(datalist$metadata, scores)
+        #Calculate species- and site scores
+        sitescores <- scores(model, display = "sites")
+        speciesscores <- scores(model, display = "species") #may return NA
     } else if(type == "mmds" | type == "pcoa") {
         #make the model
         model <- cmdscale(inputmatrix, eig = TRUE, ...)
         
         #axis (and data column) names
-        x_axis_name <- "MDS1"
-        y_axis_name <- "MDS2"
+        x_axis_name <- "MMDS1"
+        y_axis_name <- "MMDS2"
         
-        #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:5)
-        colnames(scores) <- c(x_axis_name, y_axis_name)
-        d <- cbind.data.frame(datalist$metadata, scores)
+        #Calculate species- and site scores
+        sitescores <- scores(model, display = "sites")
+        colnames(sitescores) <- c(x_axis_name, y_axis_name)
+        speciesscores <- scores(model, display = "species") #may return NA
     } else if(type == "ca") {
         #make the model
         model <- cca(inputmatrix, ...)
@@ -106,9 +107,9 @@ ord_mep <- function(
         #Calculate the percentage of eigenvalues explained by the axes
         totalvar <- round(model$CA$eig/model$CA$tot.chi * 100, 1)
         
-        #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:5)$sites
-        d <- cbind.data.frame(datalist$metadata, scores)
+        #Calculate species- and site scores
+        sitescores <- scores(model, display = "sites")
+        speciesscores <- scores(model, display = "species")
     } else if(type == "cca") {
         if(is.null(constrain)) 
             stop("Argument constrain must be provided when performing constrained/canonical analysis.")
@@ -128,14 +129,32 @@ ord_mep <- function(
                       round(model$CCA$eig/model$CA$tot.chi * 100, 1)
         )
         
-        #calculate site scores and combine with metadata
-        scores <- scores(model, choices = 1:5)$sites
-        d <- cbind.data.frame(datalist$metadata, scores)
+        #Calculate species- and site scores
+        sitescores <- scores(model, display = "sites")
+        speciesscores <- scores(model, display = "species")
+    } else if(type == "dca") {
+        #make the model
+        model <- decorana(inputmatrix, ...)
+        
+        #axis (and data column) names
+        x_axis_name <- "DCA1"
+        y_axis_name <- "DCA2"
+        
+        #Calculate the percentage of eigenvalues explained by the axes
+        #totalvar <- round(model$CA$eig/model$CA$tot.chi * 100, 1)
+        
+        #Calculate species- and site scores
+        sitescores <- scores(model, display = "sites")
+        speciesscores <- scores(model, display = "species")
     }
     #################################### end of block ####################################
     
-    # Generate a nice ggplot with the coordinates from scores
-    plot <- ggplot(d,
+    #Make data frames for ggplot
+    dspecies <- cbind.data.frame(speciesscores)
+    dsites <- cbind.data.frame(datalist$metadata, sitescores)
+    
+    #Generate a nice ggplot with the coordinates from scores
+    plot <- ggplot(dsites,
                    aes_string(x = x_axis_name, y = y_axis_name, color = color_by)
     ) +
         geom_point(size = 2) + 
@@ -150,8 +169,8 @@ ord_mep <- function(
     }
     
     #Generate a color frame around the chosen color group
-    if(frame == TRUE) {
-        splitData <- split(d, d[, color_by]) %>% 
+    if(colorframe == TRUE) {
+        splitData <- split(dsites, dsites[, color_by]) %>% 
             lapply(function(df) {
                 df[chull(df[, x_axis_name], df[, y_axis_name]), ]
             })
@@ -161,13 +180,13 @@ ord_mep <- function(
     
     #Plot text labels
     if (!is.null(label_by)) {
-        temp <- data.frame(group = d[, label_by], 
-                         x = d[, x_axis_name],
-                         y = d[, y_axis_name]) %>% 
+        temp <- data.frame(group = dsites[, label_by], 
+                         x = dsites[, x_axis_name],
+                         y = dsites[, y_axis_name]) %>% 
             group_by(group) %>%
             summarise(cx = mean(x), cy = mean(y)) %>% 
             as.data.frame()
-        temp2 <- merge(d, temp,
+        temp2 <- merge(dsites, temp,
                      by.x = label_by, 
                      by.y = "group")
         temp3 <- temp2[!duplicated(temp2[, label_by]), ]
@@ -180,11 +199,17 @@ ord_mep <- function(
                                  fontface = 2
                                  )
     }
+    
+    #Plot species points
+    if (plot_species_points == TRUE) {
+        plot <- plot + geom_point(data = dspecies, color = "grey", 
+                            shape = 20, size = 2)
+    }
     #################################### end of block ####################################
     
     #return plot or additional details
     if(output == "plot")
         return(plot)
     else if(output == "detailed")
-        return(list(plot = plot, model = model, scores = scores))
+        return(list(plot = plot, model = model, sitescores = sitescores, speciesscores = speciesscores))
 }
