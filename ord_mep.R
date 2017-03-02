@@ -10,7 +10,10 @@ ord_mep <- function(
     datalist, #with 3 elements loaded with amp_load: abund, metadata and tax, first two required
     color_by = NULL, #Color points by a variable in the metadata
     type = "PCA", #Ordination type; PCA, RDA, NMDS, MMDS(or PCOA), CA, CCA, DCA
-    metric = "sqrt", #Distance metric to use to calculate distance matrix for input to the ordination functions
+    metric = NULL, #Distance metric to use to calculate distance matrix for input to the ordination functions, any of the following:
+    #"manhattan", "euclidean", "canberra", "bray", "kulczynski", "jaccard", "gower", "jsd" (Jensen-Shannon Divergence),
+    #"altGower", "morisita", "horn", "mountford", "raup" , "binomial", "chao", "cao", "mahalanobis"
+    #or simply "none" or "sqrt"
     constrain = NULL, #Variable(s) in the metadata for constrained analyses; RDA and CCA
     colorframe = TRUE, #Frame the points with a polygon colored by the color_by argument
     label_by = NULL, #Display text labels frin a variable in the metadata, can also be used to plot environmental variables
@@ -18,6 +21,10 @@ ord_mep <- function(
     output = "plot", #"plot" or "detailed"; output as list with additional information(model, scores, inputmatrix etc) or just the plot
     ... #Pass additional arguments to the vegan ordination functions, fx rda(...), cca(...), metaMDS(...), see vegan help
 ) {
+    if(is.null(metric)) {
+        warning("No metric selected. If this is not deliberate, please provide one with the argument: metric")
+        metric == "none"
+    }
     #Check the data
     datalist <- amp_rename(data = datalist, tax.empty = "best")
     
@@ -31,6 +38,31 @@ ord_mep <- function(
         inputmatrix <- t(sqrt(datalist$abund))
     } else if(metric == "none") {
         inputmatrix <- t(datalist$abund)
+    } else if(metric == "jsd") {
+        #This is based on http://enterotype.embl.de/enterotypes.html
+        #Abundances of 0 will be set to the pseudocount value to avoid 0-value denominators
+        dist.JSD <- function(inMatrix, pseudocount=0.000001) {
+            KLD <- function(x,y) sum(x *log(x/y))
+            JSD<- function(x,y) sqrt(0.5 * KLD(x, (x+y)/2) + 0.5 * KLD(y, (x+y)/2))
+            matrixColSize <- length(colnames(inMatrix))
+            matrixRowSize <- length(rownames(inMatrix))
+            colnames <- colnames(inMatrix)
+            resultsMatrix <- matrix(0, matrixColSize, matrixColSize)
+            
+            inMatrix = apply(inMatrix,1:2,function(x) ifelse (x==0,pseudocount,x))
+            
+            for(i in 1:matrixColSize) {
+                for(j in 1:matrixColSize) { 
+                    resultsMatrix[i,j]=JSD(as.vector(inMatrix[,i]),
+                                           as.vector(inMatrix[,j]))
+                }
+            }
+            colnames -> colnames(resultsMatrix) -> rownames(resultsMatrix)
+            as.dist(resultsMatrix)->resultsMatrix
+            attr(resultsMatrix, "method") <- "dist"
+            return(resultsMatrix) 
+        }
+        inputmatrix <- dist.JSD(datalist$abund)
     } else if(any(metric == c("manhattan", "euclidean", "canberra", "bray", "kulczynski", "jaccard", "gower", "altGower", "morisita", "horn", "mountford", "raup" , "binomial", "chao", "cao", "mahalanobis"))) {
         inputmatrix <- vegdist(t(datalist$abund), method = metric)
     }
@@ -82,20 +114,30 @@ ord_mep <- function(
         y_axis_name <- "NMDS2"
         
         #Calculate species- and site scores
+        #Speciesscores may not be available with MDS
         sitescores <- scores(model, display = "sites")
-        speciesscores <- scores(model, display = "species") #may return NA
+        if(ncol(scores(model)) == 2) {
+            speciesscores <- warning("Speciesscores are unfortunately not available")
+        } else {
+            speciesscores <- scores(model, display = "species")
+        }
     } else if(type == "mmds" | type == "pcoa") {
         #make the model
         model <- cmdscale(inputmatrix, eig = TRUE, ...)
         
         #axis (and data column) names
-        x_axis_name <- "MMDS1"
-        y_axis_name <- "MMDS2"
+        x_axis_name <- "PCoA1"
+        y_axis_name <- "PCoA2"
         
         #Calculate species- and site scores
+        #Speciesscores may not be available with MDS
         sitescores <- scores(model, display = "sites")
         colnames(sitescores) <- c(x_axis_name, y_axis_name)
-        speciesscores <- scores(model, display = "species") #may return NA
+        if(ncol(scores(model)) == 2) {
+            speciesscores <- warning("Speciesscores are unfortunately not available")
+        } else {
+            speciesscores <- scores(model, display = "species")
+        }
     } else if(type == "ca") {
         #make the model
         model <- cca(inputmatrix, ...)
@@ -150,7 +192,9 @@ ord_mep <- function(
     #################################### end of block ####################################
     
     #Make data frames for ggplot
-    dspecies <- cbind.data.frame(speciesscores)
+    if(length(speciesscores) > 1) {
+        dspecies <- cbind.data.frame(speciesscores)
+    }
     dsites <- cbind.data.frame(datalist$metadata, sitescores)
     
     #Generate a nice ggplot with the coordinates from scores
