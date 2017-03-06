@@ -15,9 +15,11 @@ ord_mep <- function(
     #"altGower", "morisita", "horn", "mountford", "raup" , "binomial", "chao", "cao", "mahalanobis"
     #or simply "none" or "sqrt"
     constrain = NULL, #Variable(s) in the metadata for constrained analyses; RDA and CCA
-    colorframe = TRUE, #Frame the points with a polygon colored by the color_by argument
+    colorframe = FALSE, #Frame the points with a polygon colored by the color_by argument
     label_by = NULL, #Display text labels frin a variable in the metadata, can also be used to plot environmental variables
-    plot_species_points = FALSE,
+    plot_species_points = FALSE, #Plot species points
+    nspecies_labels = 0, #Number of most extreme species labels to plot
+    label_species_by = "Genus", #Taxonomic level by which to label the species points
     output = "plot", #"plot" or "detailed"; output as list with additional information(model, scores, inputmatrix etc) or just the plot
     ... #Pass additional arguments to the vegan ordination functions, fx rda(...), cca(...), metaMDS(...), see vegan help
 ) {
@@ -193,7 +195,10 @@ ord_mep <- function(
     
     #Make data frames for ggplot
     if(length(speciesscores) > 1) {
-        dspecies <- cbind.data.frame(speciesscores)
+        dspecies <- merge(data.frame(speciesscores, OTU = rownames(speciesscores)), datalist$tax, by.x = "OTU")
+        dspecies$dist <- dspecies[, x_axis_name]^2 + dspecies[, y_axis_name]^2
+        dspecies <- arrange(dspecies, desc(dist))
+        rownames(dspecies) <- dspecies$OTU
     }
     dsites <- cbind.data.frame(datalist$metadata, sitescores)
     
@@ -212,8 +217,34 @@ ord_mep <- function(
             ylab(paste(y_axis_name, " [", totalvar[y_axis_name], "%]", sep = ""))
     }
     
+    #Plot species points
+    if (plot_species_points == TRUE) {
+        plot <- plot + 
+            geom_point(data = dspecies,
+                       color = "grey",
+                       shape = 20,
+                       size = 2
+            )
+    }
+    
+    #Plot species labels
+    if (nspecies_labels > 0) {
+        plot <- plot +
+            geom_text_repel(data = dspecies[1:nspecies_labels,],
+                      aes_string(x = x_axis_name,
+                                 y = y_axis_name,
+                                 label = label_species_by
+                      ),
+                      colour = "grey30",
+                      size = 3,
+                      fontface = 4,
+                      inherit.aes = FALSE
+            )
+    }
+    
     #Generate a color frame around the chosen color group
     if(colorframe == TRUE) {
+        if(is.null(color_by)) stop("Please provide the argument color_by")
         splitData <- split(dsites, dsites[, color_by]) %>% 
             lapply(function(df) {
                 df[chull(df[, x_axis_name], df[, y_axis_name]), ]
@@ -234,26 +265,22 @@ ord_mep <- function(
                      by.x = label_by, 
                      by.y = "group")
         temp3 <- temp2[!duplicated(temp2[, label_by]), ]
-        plot <- plot + geom_text(data = temp3,
-                                 aes_string(x = "cx", 
-                                            y = "cy",
-                                            label = label_by),
-                                 size = 3,
-                                 color = "black",
-                                 fontface = 2
-                                 )
+        plot <- plot +
+            geom_text_repel(data = temp3,
+                     aes_string(x = "cx", 
+                                y = "cy",
+                                label = label_by),
+                     size = 3,
+                     color = "black",
+                     fontface = 2
+                     )
     }
     
-    #Plot species points
-    if (plot_species_points == TRUE) {
-        plot <- plot + geom_point(data = dspecies, color = "grey", 
-                            shape = 20, size = 2)
-    }
     #################################### end of block ####################################
     
     #return plot or additional details
     if(output == "plot")
         return(plot)
     else if(output == "detailed")
-        return(list(plot = plot, model = model, sitescores = sitescores, speciesscores = speciesscores))
+        return(list(plot = plot, model = model, dsites = dsites, dspecies = dspecies))
 }
