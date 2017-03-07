@@ -5,18 +5,21 @@
 #for the same samples can be used. Simply choose the desired distance metric and 
 #ordination method and a plot is returned.
 #Required packages:
-#dplyr, ampvis, vegan, 
+#dplyr, ampvis, vegan, ape(for PCOA)
 ord_mep <- function(
-    datalist, #with 3 elements loaded with amp_load: abund, metadata and tax, first two required
-    color_by = NULL, #Color points by a variable in the metadata
-    type = "PCA", #Ordination type; PCA, RDA, NMDS, MMDS(or PCOA), CA, CCA, DCA
+    datalist, #Data list loaded with amp_load containing the elements: abund, metadata and tax
+    type = "PCA", #Ordination type; PCA, RDA, NMDS, MMDS (aka PCOA), CA, CCA, DCA
     metric = NULL, #Distance metric to use to calculate distance matrix for input to the ordination functions, any of the following:
     #"manhattan", "euclidean", "canberra", "bray", "kulczynski", "jaccard", "gower", "jsd" (Jensen-Shannon Divergence),
     #"altGower", "morisita", "horn", "mountford", "raup" , "binomial", "chao", "cao", "mahalanobis"
-    #or simply "none" or "sqrt"
+    #or simply "none" or "sqrt". See details in ?vegdist and http://enterotype.embl.de/enterotypes.html for JSD
+    transform = NULL, #Transform the abundance table with the decostand() function, 
+    #fx "normalize", "chi.square", "hellinger" or "sqrt", see details in ?decostand
     constrain = NULL, #Variable(s) in the metadata for constrained analyses; RDA and CCA
+    color_by = NULL, #Color points by a variable in the metadata
     colorframe = FALSE, #Frame the points with a polygon colored by the color_by argument
-    label_by = NULL, #Display text labels frin a variable in the metadata, can also be used to plot environmental variables
+    opacity = NULL, #Sample points and colorframe opacity, 0:invisible, 1:opaque
+    label_by = NULL, #Label by a variable in the metadata, can also be used to plot environmental variables
     plot_species_points = FALSE, #Plot species points
     nspecies_labels = 0, #Number of most extreme species labels to plot
     label_species_by = "Genus", #Taxonomic level by which to label the species points
@@ -25,7 +28,7 @@ ord_mep <- function(
 ) {
     if(is.null(metric)) {
         warning("No metric selected. If this is not deliberate, please provide one with the argument: metric")
-        metric == "none"
+        metric <- "none"
     }
     #Check the data
     datalist <- amp_rename(data = datalist, tax.empty = "best")
@@ -35,10 +38,17 @@ ord_mep <- function(
     metric <- tolower(metric)
     output <- tolower(output)
     
+    #data transformation
+    if(!is.null(transform)) {
+        if(transform == "sqrt") {
+            inputmatrix <- t(sqrt(datalist$abund))
+        } else {
+            datalist$abund <- t(decostand(t(datalist$abund), method = transform))
+        }
+    }
+    
     #Calculate distance/variance/covariance/dissimilarity/similarity matrix from vegdist()
-    if(metric == "sqrt") {
-        inputmatrix <- t(sqrt(datalist$abund))
-    } else if(metric == "none") {
+    if (metric == "none") {
         inputmatrix <- t(datalist$abund)
     } else if(metric == "jsd") {
         #This is based on http://enterotype.embl.de/enterotypes.html
@@ -79,8 +89,8 @@ ord_mep <- function(
         x_axis_name <- "PC1"
         y_axis_name <- "PC2"
         
-        #Calculate the percentage of eigenvalues explained by the axes
-        totalvar <- round(model$CA$eig/model$CA$tot.chi * 100, 1)
+        #Calculate the amount of inertia explained by each axis
+        totalvar <- round(model$CA$eig/model$tot.chi * 100, 1)
         
         #Calculate species- and site scores
         sitescores <- scores(model, display = "sites")
@@ -89,7 +99,7 @@ ord_mep <- function(
         if(is.null(constrain)) 
             stop("Argument constrain must be provided when performing constrained/canonical analysis.")
         #make the model
-        codestring <- paste0("rda(inputmatrix~", paste(constrain, collapse = "+"), ", datalist$metadata, ...)") #function arguments written as in rda(x ~ y + z) hard to pass to rda(), now user just provides a vector
+        codestring <- paste0("rda(inputmatrix~", paste(constrain, collapse = "+"), ", datalist$metadata, ...)") #function arguments written in the format "rda(x ~ y + z)" cannot be directly passed to rda(), now user just provides a vector
         model <-  eval(parse(text = codestring))
         
         #axes depends on the results
@@ -99,9 +109,9 @@ ord_mep <- function(
             y_axis_name <- "RDA2"
         }
         
-        #Calculate the percentage of eigenvalues explained by the axes
-        totalvar <- c(round(model$CA$eig/model$tot.chi * 100, 1),
-                      round(model$CCA$eig/model$CA$tot.chi * 100, 1)
+        #Calculate the amount of inertia explained by each axis
+        totalvar <- c(round(model$CCA$eig/model$tot.chi * 100, 1), #constrained space
+                      round(model$CA$eig/model$tot.chi * 100, 1) #unconstrained space
         )
         
         #Calculate species- and site scores
@@ -109,7 +119,7 @@ ord_mep <- function(
         speciesscores <- scores(model, display = "species")
     } else if(type == "nmds") {
         #make the model
-        model <- metaMDS(inputmatrix, trace = FALSE, distance = metric, ...)
+        model <- metaMDS(inputmatrix, trace = FALSE, ...)
         
         #axis (and data column) names
         x_axis_name <- "NMDS1"
@@ -118,28 +128,28 @@ ord_mep <- function(
         #Calculate species- and site scores
         #Speciesscores may not be available with MDS
         sitescores <- scores(model, display = "sites")
-        if(ncol(scores(model)) == 2) {
-            speciesscores <- warning("Speciesscores are unfortunately not available")
+        if(is.na(model$species)) {
+            speciesscores <- warning("Speciesscores are not available")
         } else {
             speciesscores <- scores(model, display = "species")
         }
     } else if(type == "mmds" | type == "pcoa") {
         #make the model
-        model <- cmdscale(inputmatrix, eig = TRUE, ...)
+        model <- pcoa(inputmatrix, ...)
         
         #axis (and data column) names
-        x_axis_name <- "PCoA1"
-        y_axis_name <- "PCoA2"
+        x_axis_name <- "PCo1"
+        y_axis_name <- "PCo2"
+        
+        #Calculate the percentage of eigenvalues explained by the axes
+        totalvar <- round(model$values$Relative_eig * 100, 1)
+        names(totalvar) <- c(paste0("PCo", seq(1:length(totalvar))))
         
         #Calculate species- and site scores
-        #Speciesscores may not be available with MDS
-        sitescores <- scores(model, display = "sites")
-        colnames(sitescores) <- c(x_axis_name, y_axis_name)
-        if(ncol(scores(model)) == 2) {
-            speciesscores <- warning("Speciesscores are unfortunately not available")
-        } else {
-            speciesscores <- scores(model, display = "species")
-        }
+        #Speciesscores are not available with pcoa
+        sitescores <- as.data.frame(model$vectors)
+        colnames(sitescores) <- c(paste0("PCo", seq(1:length(sitescores))))
+        speciesscores <- warning("Speciesscores are not available")
     } else if(type == "ca") {
         #make the model
         model <- cca(inputmatrix, ...)
@@ -149,7 +159,7 @@ ord_mep <- function(
         y_axis_name <- "CA2"
         
         #Calculate the percentage of eigenvalues explained by the axes
-        totalvar <- round(model$CA$eig/model$CA$tot.chi * 100, 1)
+        totalvar <- round(model$CA$eig/model$tot.chi * 100, 1)
         
         #Calculate species- and site scores
         sitescores <- scores(model, display = "sites")
@@ -158,7 +168,7 @@ ord_mep <- function(
         if(is.null(constrain)) 
             stop("Argument constrain must be provided when performing constrained/canonical analysis.")
         #make the model
-        codestring <- paste0("cca(inputmatrix~", paste(constrain, collapse = "+"), ", datalist$metadata, ...)") #function arguments written as in rda(x ~ y + z) hard to pass to rda(), now user just provides a vector
+        codestring <- paste0("cca(inputmatrix~", paste(constrain, collapse = "+"), ", datalist$metadata, ...)") #function arguments written in the format "rda(x ~ y + z)" cannot be directly passed to rda(), now user just provides a vector
         model <-  eval(parse(text = codestring))
         
         #axes depends on the results
@@ -169,8 +179,8 @@ ord_mep <- function(
         }
         
         #Calculate the percentage of eigenvalues explained by the axes
-        totalvar <- c(round(model$CA$eig/model$tot.chi * 100, 1),
-                      round(model$CCA$eig/model$CA$tot.chi * 100, 1)
+        totalvar <- c(round(model$CCA$eig/model$tot.chi * 100, 1), #constrained space
+                      round(model$CA$eig/model$tot.chi * 100, 1)  #unconstrained space
         )
         
         #Calculate species- and site scores
@@ -206,12 +216,12 @@ ord_mep <- function(
     plot <- ggplot(dsites,
                    aes_string(x = x_axis_name, y = y_axis_name, color = color_by)
     ) +
-        geom_point(size = 2) + 
+        geom_point(size = 2, alpha = opacity) + 
         theme_minimal() +
         theme(axis.line = element_line(colour = "black", size = 0.5))
     
     #only some ordination methods can be displayed with % on axes
-    if(type == "pca" | type == "rda" | type == "ca" | type == "cca") {
+    if(type == "pca" | type == "rda" | type == "ca" | type == "cca" | type == "pcoa" | type == "mmds") {
         plot <- plot +
             xlab(paste(x_axis_name, " [", totalvar[x_axis_name], "%]", sep = "")) + 
             ylab(paste(y_axis_name, " [", totalvar[y_axis_name], "%]", sep = ""))
@@ -227,21 +237,6 @@ ord_mep <- function(
             )
     }
     
-    #Plot species labels
-    if (nspecies_labels > 0) {
-        plot <- plot +
-            geom_text_repel(data = dspecies[1:nspecies_labels,],
-                      aes_string(x = x_axis_name,
-                                 y = y_axis_name,
-                                 label = label_species_by
-                      ),
-                      colour = "grey30",
-                      size = 3,
-                      fontface = 4,
-                      inherit.aes = FALSE
-            )
-    }
-    
     #Generate a color frame around the chosen color group
     if(colorframe == TRUE) {
         if(is.null(color_by)) stop("Please provide the argument color_by")
@@ -250,7 +245,7 @@ ord_mep <- function(
                 df[chull(df[, x_axis_name], df[, y_axis_name]), ]
             })
         hulls <- do.call(rbind, splitData)
-        plot <- plot + geom_polygon(data = hulls, aes_string(fill = color_by, group = color_by), alpha = 0.2)
+        plot <- plot + geom_polygon(data = hulls, aes_string(fill = color_by, group = color_by), alpha = 0.2*opacity)
     }
     
     #Plot text labels
@@ -274,6 +269,21 @@ ord_mep <- function(
                      color = "black",
                      fontface = 2
                      )
+    }
+    
+    #Plot species labels
+    if (nspecies_labels > 0) {
+        plot <- plot +
+            geom_text_repel(data = dspecies[1:nspecies_labels,],
+                            aes_string(x = x_axis_name,
+                                       y = y_axis_name,
+                                       label = label_species_by
+                            ),
+                            colour = "red",
+                            size = 3,
+                            fontface = 4,
+                            inherit.aes = FALSE
+            )
     }
     
     #################################### end of block ####################################
