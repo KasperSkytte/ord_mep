@@ -18,7 +18,7 @@ ord_mep <- function(
     constrain = NULL, #Variable(s) in the metadata for constrained analyses; RDA and CCA
     color_by = NULL, #Color points by a variable in the metadata
     colorframe = FALSE, #Frame the points with a polygon colored by the color_by argument
-    opacity = NULL, #Sample points and colorframe opacity, 0:invisible, 1:opaque
+    opacity = 1, #Sample points and colorframe opacity, 0:invisible, 1:opaque
     label_by = NULL, #Label by a variable in the metadata, can also be used to plot environmental variables
     plot_species_points = FALSE, #Plot species points
     nspecies_labels = 0, #Number of most extreme species labels to plot
@@ -209,6 +209,8 @@ ord_mep <- function(
         dspecies$dist <- dspecies[, x_axis_name]^2 + dspecies[, y_axis_name]^2
         dspecies <- arrange(dspecies, desc(dist))
         rownames(dspecies) <- dspecies$OTU
+    } else {
+        dspecies = NULL
     }
     dsites <- cbind.data.frame(datalist$metadata, sitescores)
     
