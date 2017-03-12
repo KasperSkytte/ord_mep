@@ -18,7 +18,7 @@ ord_mep <- function(
     constrain = NULL, #Variable(s) in the metadata for constrained analyses; RDA and CCA
     color_by = NULL, #Color points by a variable in the metadata
     colorframe = FALSE, #Frame the points with a polygon colored by the color_by argument
-    opacity = 1, #Sample points and colorframe opacity, 0:invisible, 1:opaque
+    opacity = 0.8, #Sample points and colorframe opacity, 0:invisible, 1:opaque
     label_by = NULL, #Label by a variable in the metadata, can also be used to plot environmental variables
     plot_species_points = FALSE, #Plot species points
     nspecies_labels = 0, #Number of most extreme species labels to plot
@@ -26,17 +26,21 @@ ord_mep <- function(
     output = "plot", #"plot" or "detailed"; output as list with additional information(model, scores, inputmatrix etc) or just the plot
     ... #Pass additional arguments to the vegan ordination functions, fx rda(...), cca(...), metaMDS(...), see vegan help
 ) {
-    if(is.null(metric)) {
-        warning("No metric selected. If this is not deliberate, please provide one with the argument: metric")
-        metric <- "none"
-    }
     #Check the data
     datalist <- amp_rename(data = datalist, tax.empty = "best")
     
     #to fix user argument characters, so fx PCoA/PCOA/pcoa are all valid
     type <- tolower(type)
-    metric <- tolower(metric)
     output <- tolower(output)
+    
+    if(!is.null(metric)) {
+        metric <- tolower(metric)
+    } else if(is.null(metric)) {
+        if(type == "nmds" | type == "mmds" | type == "dca") {
+            warning("No metric selected. If this is not deliberate, please provide one with the argument: metric")
+        }
+        metric <- "none"
+    }
     
     #data transformation
     if(!is.null(transform)) {
@@ -102,17 +106,25 @@ ord_mep <- function(
         codestring <- paste0("rda(inputmatrix~", paste(constrain, collapse = "+"), ", datalist$metadata, ...)") #function arguments written in the format "rda(x ~ y + z)" cannot be directly passed to rda(), now user just provides a vector
         model <-  eval(parse(text = codestring))
         
-        #axes depends on the results
+        #axes depend on the results
         x_axis_name <- "RDA1"
-        y_axis_name <- "PC1"
-        if (model$CCA$rank > 1) {
+        if (model$CCA$rank <= 1){
+            y_axis_name <- "PC1"
+            
+            #Calculate the amount of inertia explained by each axis
+            totalvar <- c(round(model$CCA$eig/model$tot.chi * 100, 1), #constrained of total space
+                          round(model$CA$eig/model$tot.chi * 100, 1)  #UNconstrained of total space
+            )
+            constrainedvar <- c(round(model$CA$eig/model$CA$tot.chi * 100, 1)) #UNconstrained of total UNconstrained space
+        } else if (model$CCA$rank > 1) {
             y_axis_name <- "RDA2"
+            
+            #Calculate the amount of inertia explained by each axis
+            totalvar <- c(round(model$CCA$eig/model$tot.chi * 100, 1), #constrained of total space
+                          round(model$CA$eig/model$tot.chi * 100, 1)  #UNconstrained of total space
+            )
+            constrainedvar <- c(round(model$CCA$eig/model$CCA$tot.chi * 100, 1)) #constrained of total constrained space
         }
-        
-        #Calculate the amount of inertia explained by each axis
-        totalvar <- c(round(model$CCA$eig/model$tot.chi * 100, 1), #constrained space
-                      round(model$CA$eig/model$tot.chi * 100, 1) #unconstrained space
-        )
         
         #Calculate species- and site scores
         sitescores <- scores(model, display = "sites")
@@ -128,7 +140,7 @@ ord_mep <- function(
         #Calculate species- and site scores
         #Speciesscores may not be available with MDS
         sitescores <- scores(model, display = "sites")
-        if(is.na(model$species)) {
+        if(!length(model$species) > 1) {
             speciesscores <- warning("Speciesscores are not available")
         } else {
             speciesscores <- scores(model, display = "species")
@@ -171,17 +183,25 @@ ord_mep <- function(
         codestring <- paste0("cca(inputmatrix~", paste(constrain, collapse = "+"), ", datalist$metadata, ...)") #function arguments written in the format "rda(x ~ y + z)" cannot be directly passed to rda(), now user just provides a vector
         model <-  eval(parse(text = codestring))
         
-        #axes depends on the results
+        #axes depend on the results
         x_axis_name <- "CCA1"
-        y_axis_name <- "CA1"
-        if (model$CCA$rank > 1) {
+        if (model$CCA$rank <= 1){
+            y_axis_name <- "CA1"
+            
+            #Calculate the amount of inertia explained by each axis
+            totalvar <- c(round(model$CCA$eig/model$tot.chi * 100, 1), #constrained of total space
+                          round(model$CA$eig/model$tot.chi * 100, 1)  #UNconstrained of total space
+            )
+            constrainedvar <- c(round(model$CA$eig/model$CA$tot.chi * 100, 1)) #UNconstrained of total UNconstrained space
+        } else if (model$CCA$rank > 1) {
             y_axis_name <- "CCA2"
+            
+            #Calculate the amount of inertia explained by each axis
+            totalvar <- c(round(model$CCA$eig/model$tot.chi * 100, 1), #constrained of total space
+                          round(model$CA$eig/model$tot.chi * 100, 1)  #UNconstrained of total space
+            )
+            constrainedvar <- c(round(model$CCA$eig/model$CCA$tot.chi * 100, 1)) #constrained of total constrained space
         }
-        
-        #Calculate the percentage of eigenvalues explained by the axes
-        totalvar <- c(round(model$CCA$eig/model$tot.chi * 100, 1), #constrained space
-                      round(model$CA$eig/model$tot.chi * 100, 1)  #unconstrained space
-        )
         
         #Calculate species- and site scores
         sitescores <- scores(model, display = "sites")
@@ -223,10 +243,20 @@ ord_mep <- function(
         theme(axis.line = element_line(colour = "black", size = 0.5))
     
     #only some ordination methods can be displayed with % on axes
-    if(type == "pca" | type == "rda" | type == "ca" | type == "cca" | type == "pcoa" | type == "mmds") {
+    if(type == "pca" | type == "ca" | type == "pcoa" | type == "mmds") {
         plot <- plot +
             xlab(paste(x_axis_name, " [", totalvar[x_axis_name], "%]", sep = "")) + 
             ylab(paste(y_axis_name, " [", totalvar[y_axis_name], "%]", sep = ""))
+    } else if(type == "rda" | type == "cca") {
+        if(model$CCA$rank > 1) {
+            plot <- plot + 
+                xlab(paste(x_axis_name, " [", totalvar[x_axis_name], "% / ", constrainedvar[x_axis_name], "%]", sep = "")) +
+                ylab(paste(y_axis_name, " [", totalvar[y_axis_name], "% / ", constrainedvar[y_axis_name], "%]", sep = ""))
+        } else if(model$CCA$rank <= 1) {
+            plot <- plot + 
+                xlab(paste(x_axis_name, " [", totalvar[x_axis_name], "%]", sep = "")) +
+                ylab(paste(y_axis_name, " [", totalvar[y_axis_name], "% / ", constrainedvar[y_axis_name], "%]", sep = ""))
+        }
     }
     
     #Plot species points
@@ -235,7 +265,8 @@ ord_mep <- function(
             geom_point(data = dspecies,
                        color = "grey",
                        shape = 20,
-                       size = 2
+                       size = 2,
+                       alpha = 0.8
             )
     }
     
