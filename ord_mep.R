@@ -7,22 +7,29 @@
 #Required packages:
 #dplyr, ampvis, vegan, ape(for PCOA)
 ord_mep <- function(
-    datalist, #Data list loaded with amp_load containing the elements: abund, metadata and tax
+    ##### data, ordination type, transformations etc... #####
+    datalist, #Data list loaded with amp_load containing the elements: abund, metadata and tax. For large data, use the percent=TRUE argument for faster calculations.
     type = "PCA", #Ordination type; PCA, RDA, NMDS, MMDS (aka PCOA), CA, CCA, DCA
     metric = NULL, #Distance metric to use to calculate distance matrix for input to the ordination functions, any of the following:
     #"manhattan", "euclidean", "canberra", "bray", "kulczynski", "jaccard", "gower", "jsd" (Jensen-Shannon Divergence),
     #"altGower", "morisita", "horn", "mountford", "raup" , "binomial", "chao", "cao", "mahalanobis"
     #or simply "none" or "sqrt". See details in ?vegdist and http://enterotype.embl.de/enterotypes.html for JSD
-    transform = NULL, #Transform the abundance table with the decostand() function, 
-    #fx "normalize", "chi.square", "hellinger" or "sqrt", see details in ?decostand
+    transform = NULL, #Transform the abundance table with the decostand() function, fx "normalize", "chi.square", "hellinger" or "sqrt", see details in ?decostand
     constrain = NULL, #Variable(s) in the metadata for constrained analyses; RDA and CCA
+    ##### Geometric options, colors, labels etc... #####
     color_by = NULL, #Color points by a variable in the metadata
+    label_by = NULL, #Label by a variable in the metadata
+    shape_by = NULL, #Shape by a variable in the metadata
     colorframe = FALSE, #Frame the points with a polygon colored by the color_by argument
     opacity = 0.8, #Sample points and colorframe opacity, 0:invisible, 1:opaque
-    label_by = NULL, #Label by a variable in the metadata, can also be used to plot environmental variables
     plot_species_points = FALSE, #Plot species points
     nspecies_labels = 0, #Number of most extreme species labels to plot
     label_species_by = "Genus", #Taxonomic level by which to label the species points
+    ##### fit environmental variables #####
+    envfit_factor = NULL, 
+    envfit_numeric = NULL,
+    envfit_signif_level = 0.001, 
+    ##### output #####
     output = "plot", #"plot" or "detailed"; output as list with additional information(model, scores, inputmatrix etc) or just the plot
     ... #Pass additional arguments to the vegan ordination functions, fx rda(...), cca(...), metaMDS(...), see vegan help
 ) {
@@ -32,6 +39,7 @@ ord_mep <- function(
     #to fix user argument characters, so fx PCoA/PCOA/pcoa are all valid
     type <- tolower(type)
     output <- tolower(output)
+    transform <- tolower(transform)
     
     if(!is.null(metric)) {
         metric <- tolower(metric)
@@ -236,7 +244,11 @@ ord_mep <- function(
     
     #Generate a nice ggplot with the coordinates from scores
     plot <- ggplot(dsites,
-                   aes_string(x = x_axis_name, y = y_axis_name, color = color_by)
+                   aes_string(x = x_axis_name,
+                              y = y_axis_name,
+                              color = color_by,
+                              shape = shape_by
+                              )
     ) +
         geom_point(size = 2, alpha = opacity) + 
         theme_minimal() +
@@ -319,11 +331,79 @@ ord_mep <- function(
             )
     }
     
+    ######## Fit environmental variables ########
+    # Categorial fitting
+    if(!is.null(envfit_factor)) {
+        evf_factor_model <- envfit(model,
+                          datalist$metadata[,envfit_factor, drop = FALSE],
+                          permutations = 999,
+                          choices = c(x_axis_name, y_axis_name)
+                          )
+        evf_factor_data <- data.frame(Name = rownames(evf_factor_model$factors$centroids),
+                              Variable = evf_factor_model$factors$var.id,
+                              evf_factor_model$factors$centroids,
+                              pval = evf_factor_model$factors$pvals
+                              ) %>% subset(pval <= envfit_signif_level)
+        plot <- plot + geom_text_repel(data = evf_factor_data,
+                                       aes_string(x = x_axis_name, 
+                                                  y = y_axis_name,
+                                                  label = "Name"),
+                                       colour = "darkred", 
+                                       inherit.aes = FALSE,
+                                       size = 4,
+                                       fontface = "bold")
+    } else {
+        evf_factor_model <- NULL
+    }
+    
+    # Numerical fitting
+    if (!is.null(envfit_numeric)) {
+        evf_numeric_model <- envfit(model,
+                            datalist$metadata[,envfit_numeric, drop = FALSE],
+                            permutations = 999,
+                            choices = c(x_axis_name, y_axis_name)
+        )
+        evf_numeric_data <- data.frame(Name = rownames(evf_numeric_model$vectors$arrows),
+                               evf_numeric_model$vectors$arrows,# * sqrt(evf_numeric_model$vectors$r),
+                               pval = evf_numeric_model$vectors$pvals
+                               ) %>% subset(pval <= envfit_signif_level)
+        plot <- plot + geom_segment(data = evf_numeric_data,
+                                    aes_string(x = 0,
+                                               xend = x_axis_name,
+                                               y = 0,
+                                               yend = y_axis_name
+                                               ),
+                                    arrow = arrow(length = unit(3, "mm")),
+                                    colour = "darkred",
+                                    size = 1,
+                                    inherit.aes = FALSE) + 
+            geom_text(data = evf_numeric_data,
+                      aes_string(x = x_axis_name,
+                                 y = y_axis_name,
+                                 label = "Name"),
+                      colour = "darkred",
+                      inherit.aes = FALSE,
+                      size = 4,
+                      hjust = -0.05,
+                      vjust = 1,
+                      fontface = "bold")
+        
+    } else {
+        evf_numeric_model <- NULL
+    }
+    
     #################################### end of block ####################################
     
     #return plot or additional details
     if(output == "plot")
         return(plot)
     else if(output == "detailed")
-        return(list(plot = plot, model = model, dsites = dsites, dspecies = dspecies))
+        return(list(plot = plot,
+                    model = model,
+                    dsites = dsites,
+                    dspecies = dspecies,
+                    evf_factor_model = evf_factor_model,
+                    evf_numeric_model = evf_numeric_model
+                    )
+               )
 }
