@@ -39,7 +39,6 @@ ord_mep <- function(
     #to fix user argument characters, so fx PCoA/PCOA/pcoa are all valid
     type <- tolower(type)
     output <- tolower(output)
-    transform <- tolower(transform)
     
     if(!is.null(metric)) {
         metric <- tolower(metric)
@@ -52,12 +51,13 @@ ord_mep <- function(
     
     #data transformation
     if(!is.null(transform)) {
+        transform <- tolower(transform)
         if(transform == "sqrt") {
-            inputmatrix <- t(sqrt(datalist$abund))
+            datalist$abund <- t(sqrt(t(datalist$abund)))
         } else {
             datalist$abund <- t(decostand(t(datalist$abund), method = transform))
         }
-    }
+    } 
     
     #Calculate distance/variance/covariance/dissimilarity/similarity matrix from vegdist()
     if (metric == "none") {
@@ -275,10 +275,11 @@ ord_mep <- function(
     if (plot_species_points == TRUE) {
         plot <- plot + 
             geom_point(data = dspecies,
-                       color = "grey",
-                       shape = 20,
+                       color = "darkgrey",
+                       shape = 1,
                        size = 2,
-                       alpha = 0.8
+                       alpha = 0.8,
+                       aes(text = paste0(label_species_by, ": ", dspecies$Genus)) #To allow hovering points with ggplotly()
             )
     }
     
