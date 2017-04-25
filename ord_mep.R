@@ -475,22 +475,40 @@ ord_mep <- function(
       screeplot <- NULL
     } else {
       ### screeplot ###
-      constrained_eig <- model$CCA$eig/model$tot.chi*100
-      unconstrained_eig <- model$CA$eig/model$tot.chi*100
-      if (length(constrained_eig) > 10) {
-        constrained_eig <- constrained_eig[1:10]
+      #the data for it
+      if (type == "mmds" | type == "pcoa") {
+        if (length(model$values$Relative_eig) > 10) {
+          unconstrained_eig <- model$values$Relative_eig[1:10]*100
+        } else {
+          unconstrained_eig <- model$values$Relative_eig*100
+        }
+        #the scree plot
+        screeplot <- ggplot(data.frame(axis = factor(as.character(c(1:length(unconstrained_eig))), levels = c(1:length(unconstrained_eig))), eigenvalues = unconstrained_eig), aes(x = axis, y = eigenvalues)) +
+          geom_col() +
+          #geom_text(label = round(eigenvalues, 2), vjust = -0.4, size = 3)  + #Can't get it to work
+          theme_minimal() +
+          xlab("Axis (max. 10 axes will be shown)") +
+          ylab("Eigenvalue in percent of total inertia")
+      } else {
+        unconstrained_eig <- model$CA$eig/model$tot.chi*100
+        constrained_eig <- model$CCA$eig/model$tot.chi*100
+        if (length(constrained_eig) > 10) {
+          constrained_eig <- constrained_eig[1:10]
+        }
+        if (length(unconstrained_eig) > 10) {
+          unconstrained_eig <- unconstrained_eig[1:10]
+        }
+        eigenvalues <- c(constrained_eig, unconstrained_eig) #constrained combined with unconstrained
+        #the scree plot
+        screeplot <- ggplot(data.frame(axis = factor(names(eigenvalues), levels = names(eigenvalues)), eigenvalues = eigenvalues), aes(x = axis, y = eigenvalues)) +
+          geom_col() +
+          geom_text(label = round(eigenvalues, 2), vjust = -0.25, size = 3)  +
+          theme_minimal() +
+          ylim(0, max(eigenvalues)*1.05) +
+          theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+          xlab("Axis (max. 10 axes will be shown)") +
+          ylab("Eigenvalue in percent of total inertia")
       }
-      if (length(unconstrained_eig) > 10) {
-        unconstrained_eig <- unconstrained_eig[1:10]
-      }
-      eigenvalues <- c(constrained_eig, unconstrained_eig) #constrained combined with unconstrained
-      screeplot <- ggplot(data.frame(axis = factor(names(eigenvalues), levels = names(eigenvalues)), eigenvalues), aes(x = axis, y = eigenvalues)) +
-        geom_col() +
-        geom_text(label = round(eigenvalues, 2), vjust = -1, size = 3)  +
-        theme_minimal() +
-        theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-        xlab("Axis (max. 10 axes will be shown)") +
-        ylab("Eigenvalue in percent of total inertia")
     }
     return(list(plot = plot,
                 screeplot = screeplot,
